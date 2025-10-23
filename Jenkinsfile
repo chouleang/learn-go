@@ -1,16 +1,18 @@
 pipeline {
     agent any
 
+    tools {
+        go 'go1.21'
+    }
+
     environment {
         DOCKER_IMAGE = 'chouleang/go-hello-operator'
         DOCKER_TAG = "build-${BUILD_NUMBER}"
-        PATH = "/usr/local/go/bin:${PATH}"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo "Checking out code from GitHub..."
                 checkout scm
             }
         }
@@ -18,32 +20,42 @@ pipeline {
         stage('Dependencies') {
             steps {
                 sh '''
-                echo "Go version:"
+                echo "=== Environment Setup ==="
                 go version
-                echo "Downloading dependencies..."
                 go mod download
-                go mod verify
                 '''
             }
         }
         
         stage('Build Docker Image') {
             steps {
-                script {
-                    echo "Building Docker image..."
-                    docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
-                }
+                sh """
+                echo "=== Building Docker Image ==="
+                docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                echo "Image built: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                """
             }
         }
         
         stage('Push to Docker Hub') {
             steps {
-                script {
-                    echo "Pushing to Docker Hub..."
-                    docker.withRegistry('', 'docker-hub-cred') {
-                        docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
-                        docker.image("${DOCKER_IMAGE}:latest").push()
-                    }
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-hub-cred',
+                    usernameVariable: 'DOCKER_USERNAME',
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )]) {
+                    sh """
+                    echo "=== Pushing to Docker Hub ==="
+                    echo "Logging in as \$DOCKER_USERNAME..."
+                    echo \$DOCKER_PASSWORD | docker login -u \$DOCKER_USERNAME --password-stdin
+                    
+                    echo "Pushing images..."
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    
+                    echo "Logging out..."
+                    docker logout
+                    echo "✅ Push completed!"
+                    """
                 }
             }
         }
@@ -51,13 +63,14 @@ pipeline {
     
     post {
         always {
-            echo 'Pipeline completed!'
+            echo '=== Pipeline Completed ==='
+            cleanWs()
         }
         success {
-            echo "SUCCESS: Image ${DOCKER_IMAGE}:${DOCKER_TAG} pushed to Docker Hub"
+            echo "✅ SUCCESS: Image ${DOCKER_IMAGE}:${DOCKER_TAG} pushed to Docker Hub"
         }
         failure {
-            echo 'Pipeline failed! Check the logs above.'
+            echo '❌ Pipeline failed!'
         }
     }
 }
