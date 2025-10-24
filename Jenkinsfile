@@ -8,6 +8,10 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'chouleang/go-hello-operator'
         DOCKER_TAG = "build-${BUILD_NUMBER}-${GIT_COMMIT.substring(0, 8)}"
+        GCP_PROJECT = 'YOUR_GCP_PROJECT_ID'
+        GKE_CLUSTER = 'go-hello-cluster'
+        GKE_ZONE = 'asia-southeast1-a'
+
     }
 
     stages {
@@ -54,6 +58,33 @@ pipeline {
                     docker logout
                     echo "✅ Successfully pushed to Docker Hub!"
                     """
+                }
+            }
+        }
+
+        stage('Deploy to GKE Singapore') {
+            steps {
+                script {
+                    withCredentials([file(credentialsId: 'gcp-service-account-key', variable: 'GCP_KEY')]) {
+                        sh """
+                        # Authenticate to GCP
+                        gcloud auth activate-service-account --key-file=${GCP_KEY}
+                        
+                        # Configure kubectl to use our Singapore GKE cluster
+                        gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GCP_PROJECT}
+                        
+                        # Update the deployment with new image
+                        kubectl set image deployment/go-hello-operator go-hello-operator=${DOCKER_IMAGE}:${DOCKER_TAG}
+                        
+                        # Wait for rollout to complete
+                        kubectl rollout status deployment/go-hello-operator
+                        
+                        # Get the service external IP
+                        EXTERNAL_IP=$(kubectl get service go-hello-operator-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+                        echo "🎯 Application deployed to Singapore GKE"
+                        echo "🌐 Access your app at: http://\$EXTERNAL_IP"
+                        """
+                    }
                 }
             }
         }

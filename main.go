@@ -12,7 +12,10 @@ func main() {
         hostname, _ := os.Hostname()
         fmt.Fprintf(w, "Hello, DevOps World!\n")
         fmt.Fprintf(w, "Container: %s\n", hostname)
-        fmt.Fprintf(w, "Version: 1.0.0\n")
+        fmt.Fprintf(w, "🕐 Version: 2.0.0 - Automated GKE Deployment\n")
+        fmt.Fprintf(w, "⏰ Server Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+        fmt.Fprintf(w, "🌍 Region: Singapore GKE\n")
+        fmt.Fprintf(w, "🎯 Commit: Automated CI/CD Pipeline\n")
     })
 
     http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
