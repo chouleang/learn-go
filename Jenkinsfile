@@ -1,5 +1,10 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'google/cloud-sdk:alpine'
+            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/local/bin/docker:/usr/bin/docker'
+        }
+    }
 
     tools {
         go 'go1.21'
@@ -10,39 +15,12 @@ pipeline {
         DOCKER_TAG = "build-${BUILD_NUMBER}"
         GKE_CLUSTER = 'go-hello-cluster'
         GKE_ZONE = 'asia-southeast1-a'
-        CLOUDSDK_INSTALL_DIR = "${WORKSPACE}/gcloud"
-        PATH = "${WORKSPACE}/gcloud/google-cloud-sdk/bin:${env.PATH}"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-            }
-        }
-        
-        stage('Install gcloud') {
-            steps {
-                script {
-                    sh '''
-                        set -e
-                        echo "Installing Google Cloud SDK in workspace..."
-                        
-                        # Download to workspace (no root permissions needed)
-                        cd $WORKSPACE
-                        curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
-                        
-                        # Extract to workspace
-                        tar -xf google-cloud-cli-linux-x86_64.tar.gz
-                        
-                        # Install without prompts
-                        ./google-cloud-sdk/install.sh --quiet --usage-reporting false --command-completion false --path-update false
-                        
-                        # Verify installation
-                        ./google-cloud-sdk/bin/gcloud --version
-                        echo "Google Cloud SDK installed successfully!"
-                    '''
-                }
             }
         }
         
@@ -85,10 +63,8 @@ pipeline {
                 script {
                     withCredentials([file(credentialsId: 'gcp-service-account-key', variable: 'GCP_KEY')]) {
                         sh """
-                        # gcloud is now in PATH from environment
+                        # gcloud is pre-installed in this container
                         gcloud auth activate-service-account --key-file=${GCP_KEY}
-                        
-                        # Configure kubectl to use our Singapore GKE cluster
                         gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE}
                         
                         # Update the deployment with new image
