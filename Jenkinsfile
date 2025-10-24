@@ -21,10 +21,11 @@ pipeline {
         stage('Setup') {
             steps {
                 sh '''
-                    # Install Go and Docker
-                    apk add --no-cache go docker
+                    # Install Go, Docker, and kubectl
+                    apk add --no-cache go docker kubectl
                     go version
                     docker --version
+                    kubectl version --client
                     echo "All dependencies installed successfully!"
                 '''
             }
