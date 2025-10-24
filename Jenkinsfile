@@ -52,32 +52,50 @@ pipeline {
                 }
             }
         }
+        
         stage('Install gcloud') {
-    steps {
-        script {
-            sh '''
-                # Install gcloud
-                echo "Installing Google Cloud SDK..."
-                apt-get update && apt-get install -y curl
-                curl https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir=/opt
-                export PATH=/opt/google-cloud-sdk/bin:$PATH
-                
-                # Verify installation
-                gcloud --version
-            '''
+            steps {
+                script {
+                    sh '''
+                        # Install gcloud reliably
+                        set -e
+                        
+                        echo "Installing Google Cloud SDK..."
+                        
+                        # Check what OS we're on
+                        if [ -f /etc/alpine-release ]; then
+                            # Alpine Linux
+                            apk add --no-cache curl python3
+                            curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+                            tar -xf google-cloud-cli-linux-x86_64.tar.gz -C /opt/
+                        else
+                            # Debian/Ubuntu
+                            apt-get update && apt-get install -y curl python3
+                            curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+                            tar -xf google-cloud-cli-linux-x86_64.tar.gz -C /opt/
+                        fi
+                        
+                        # Install without prompts
+                        /opt/google-cloud-sdk/install.sh --quiet --usage-reporting false --command-completion false --path-update false
+                        
+                        # Verify installation
+                        /opt/google-cloud-sdk/bin/gcloud --version
+                        echo "Google Cloud SDK installed successfully!"
+                    '''
+                }
+            }
         }
-    }
-}
+        
         stage('Deploy to GKE Singapore') {
             steps {
                 script {
                     withCredentials([file(credentialsId: 'gcp-service-account-key', variable: 'GCP_KEY')]) {
                         sh """
-                        # Authenticate to GCP
-                        gcloud auth activate-service-account --key-file=${GCP_KEY}
+                        # Use full path to gcloud
+                        /opt/google-cloud-sdk/bin/gcloud auth activate-service-account --key-file=${GCP_KEY}
                         
                         # Configure kubectl to use our Singapore GKE cluster
-                        gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE}
+                        /opt/google-cloud-sdk/bin/gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE}
                         
                         # Update the deployment with new image
                         kubectl set image deployment/go-hello-operator go-hello-operator=${DOCKER_IMAGE}:${DOCKER_TAG}
