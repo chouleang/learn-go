@@ -10,12 +10,39 @@ pipeline {
         DOCKER_TAG = "build-${BUILD_NUMBER}"
         GKE_CLUSTER = 'go-hello-cluster'
         GKE_ZONE = 'asia-southeast1-a'
+        CLOUDSDK_INSTALL_DIR = "${WORKSPACE}/gcloud"
+        PATH = "${WORKSPACE}/gcloud/google-cloud-sdk/bin:${env.PATH}"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
+            }
+        }
+        
+        stage('Install gcloud') {
+            steps {
+                script {
+                    sh '''
+                        set -e
+                        echo "Installing Google Cloud SDK in workspace..."
+                        
+                        # Download to workspace (no root permissions needed)
+                        cd $WORKSPACE
+                        curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+                        
+                        # Extract to workspace
+                        tar -xf google-cloud-cli-linux-x86_64.tar.gz
+                        
+                        # Install without prompts
+                        ./google-cloud-sdk/install.sh --quiet --usage-reporting false --command-completion false --path-update false
+                        
+                        # Verify installation
+                        ./google-cloud-sdk/bin/gcloud --version
+                        echo "Google Cloud SDK installed successfully!"
+                    '''
+                }
             }
         }
         
@@ -53,49 +80,16 @@ pipeline {
             }
         }
         
-        stage('Install gcloud') {
-            steps {
-                script {
-                    sh '''
-                        # Install gcloud reliably
-                        set -e
-                        
-                        echo "Installing Google Cloud SDK..."
-                        
-                        # Check what OS we're on
-                        if [ -f /etc/alpine-release ]; then
-                            # Alpine Linux
-                            apk add --no-cache curl python3
-                            curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
-                            tar -xf google-cloud-cli-linux-x86_64.tar.gz -C /opt/
-                        else
-                            # Debian/Ubuntu
-                            apt-get update && apt-get install -y curl python3
-                            curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
-                            tar -xf google-cloud-cli-linux-x86_64.tar.gz -C /opt/
-                        fi
-                        
-                        # Install without prompts
-                        /opt/google-cloud-sdk/install.sh --quiet --usage-reporting false --command-completion false --path-update false
-                        
-                        # Verify installation
-                        /opt/google-cloud-sdk/bin/gcloud --version
-                        echo "Google Cloud SDK installed successfully!"
-                    '''
-                }
-            }
-        }
-        
         stage('Deploy to GKE Singapore') {
             steps {
                 script {
                     withCredentials([file(credentialsId: 'gcp-service-account-key', variable: 'GCP_KEY')]) {
                         sh """
-                        # Use full path to gcloud
-                        /opt/google-cloud-sdk/bin/gcloud auth activate-service-account --key-file=${GCP_KEY}
+                        # gcloud is now in PATH from environment
+                        gcloud auth activate-service-account --key-file=${GCP_KEY}
                         
                         # Configure kubectl to use our Singapore GKE cluster
-                        /opt/google-cloud-sdk/bin/gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE}
+                        gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE}
                         
                         # Update the deployment with new image
                         kubectl set image deployment/go-hello-operator go-hello-operator=${DOCKER_IMAGE}:${DOCKER_TAG}
