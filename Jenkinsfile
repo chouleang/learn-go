@@ -71,9 +71,9 @@ pipeline {
                         kubectl rollout status deployment/go-hello-operator
                         
                         # Get the service external IP
-                        EXTERNAL_IP=$(kubectl get service go-hello-operator-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+                        EXTERNAL_IP=\$(kubectl get service go-hello-operator-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
                         echo "Application deployed to Singapore GKE"
-                        echo "Access your app at: http://$EXTERNAL_IP"
+                        echo "Access your app at: http://\$EXTERNAL_IP"
                         """
                     }
                 }
