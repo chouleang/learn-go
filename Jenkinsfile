@@ -21,8 +21,16 @@ pipeline {
         stage('Setup') {
             steps {
                 sh '''
-                    # Install Go, Docker, and kubectl
-                    apk add --no-cache go docker kubectl
+                    # Install Go, Docker, kubectl, and gke-gcloud-auth-plugin
+                    apk add --no-cache go docker
+                    
+                    # Install kubectl and gke-gcloud-auth-plugin
+                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+                    
+                    # Install gke-gcloud-auth-plugin
+                    gcloud components install gke-gcloud-auth-plugin --quiet
+                    
                     go version
                     docker --version
                     kubectl version --client
