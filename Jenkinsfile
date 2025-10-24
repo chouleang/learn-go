@@ -52,7 +52,22 @@ pipeline {
                 }
             }
         }
-        
+        stage('Install gcloud') {
+    steps {
+        script {
+            sh '''
+                # Install gcloud
+                echo "Installing Google Cloud SDK..."
+                apt-get update && apt-get install -y curl
+                curl https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir=/opt
+                export PATH=/opt/google-cloud-sdk/bin:$PATH
+                
+                # Verify installation
+                gcloud --version
+            '''
+        }
+    }
+}
         stage('Deploy to GKE Singapore') {
             steps {
                 script {
