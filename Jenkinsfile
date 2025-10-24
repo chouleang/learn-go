@@ -2,12 +2,8 @@ pipeline {
     agent {
         docker {
             image 'google/cloud-sdk:alpine'
-            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/local/bin/docker:/usr/bin/docker'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
         }
-    }
-
-    tools {
-        go 'go1.21'
     }
 
     environment {
@@ -18,6 +14,16 @@ pipeline {
     }
 
     stages {
+        stage('Setup') {
+            steps {
+                sh '''
+                    # Install Go in the container
+                    apk add --no-cache go
+                    go version
+                '''
+            }
+        }
+        
         stage('Checkout') {
             steps {
                 checkout scm
@@ -63,17 +69,13 @@ pipeline {
                 script {
                     withCredentials([file(credentialsId: 'gcp-service-account-key', variable: 'GCP_KEY')]) {
                         sh """
-                        # gcloud is pre-installed in this container
+                        # gcloud is pre-installed!
                         gcloud auth activate-service-account --key-file=${GCP_KEY}
                         gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE}
                         
-                        # Update the deployment with new image
                         kubectl set image deployment/go-hello-operator go-hello-operator=${DOCKER_IMAGE}:${DOCKER_TAG}
-                        
-                        # Wait for rollout to complete
                         kubectl rollout status deployment/go-hello-operator
                         
-                        # Get the service external IP
                         EXTERNAL_IP=\$(kubectl get service go-hello-operator-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
                         echo "Application deployed to Singapore GKE"
                         echo "Access your app at: http://\$EXTERNAL_IP"
