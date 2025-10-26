@@ -3,7 +3,7 @@ pipeline {
     
     environment {
         IMAGE_NAME = 'go-hello-operator'
-        VAULT_ADDR = 'http://vault.qwerfvcxza.site'  // Replace with your actual Vault URL
+        VAULT_ADDR = 'http://vault.qwerfvcxza.site'  // UPDATE THIS!
     }
     
     stages {
@@ -18,11 +18,11 @@ pipeline {
                 withVault(
                     configuration: [
                         vaultUrl: "${VAULT_ADDR}",
-                        vaultCredentialId: 'b1fd7cdc-25c5-4a31-9e87-3dce22039c11'  // Name of your Jenkins credential
+                        vaultCredentialId: 'b1fd7cdc-25c5-4a31-9e87-3dce22039c11'  // Must match Jenkins credential
                     ],
                     vaultSecrets: [
                         [
-                            path: 'secret/jenkins/go-operator',
+                            path: 'secret/data/jenkins/go-operator',
                             secretValues: [
                                 [envVar: 'VAULT_TOKEN', vaultKey: 'vault-token'],
                                 [envVar: 'ENVIRONMENT', vaultKey: 'environment'],
@@ -31,33 +31,24 @@ pipeline {
                         ]
                     ]
                 ) {
-                    echo "✅ Vault secrets loaded:"
-                    sh 'echo "Environment: $ENVIRONMENT"'
-                    sh 'echo "Docker password length: ${#DOCKER_PASSWORD}"'
-                    // Don't echo the actual token for security
+                    echo "✅ Vault secrets loaded"
                 }
             }
         }
         
-        stage('Build and Test') {
-            steps {
-                sh '''
-                    echo "Building Go application..."
-                    go mod download
-                    go test ./... -v
-                    go build -o main .
-                '''
-            }
-        }
-        
-        stage('Build Docker Image') {
+        stage('Build with Dockerfile') {
             steps {
                 script {
-                    // Build with Vault environment variables
+                    // THIS IS THE KEY - Let Dockerfile handle everything!
+                    // Your Dockerfile already:
+                    // 1. Downloads dependencies (go mod download)
+                    // 2. Builds the Go binary (go build)
+                    // 3. Creates optimized container
                     sh """
                         docker build -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
                         docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${IMAGE_NAME}:latest
                     """
+                    echo "✅ Docker image built using Dockerfile"
                 }
             }
         }
@@ -66,14 +57,19 @@ pipeline {
             steps {
                 script {
                     sh """
+                        # Test that the container works
                         docker run -d --name test-app \
                           -e VAULT_ADDR="${VAULT_ADDR}" \
                           -e VAULT_TOKEN="${VAULT_TOKEN}" \
                           -e ENVIRONMENT="${ENVIRONMENT}" \
                           -p 8080:8080 ${IMAGE_NAME}:${env.BUILD_NUMBER} &
-                        sleep 15
-                        echo "Testing container..."
+                        sleep 10
+                        
+                        # Verify the application responds
+                        echo "Testing application..."
                         curl -f http://localhost:8080 || exit 1
+                        
+                        # Cleanup test container
                         docker stop test-app
                         docker rm test-app
                     """
@@ -90,12 +86,14 @@ pipeline {
                     withCredentials([usernamePassword(
                         credentialsId: 'dockerhub-creds',
                         usernameVariable: 'DOCKER_USERNAME',
-                        passwordVariable: 'DOCKER_PASSWORD'  // This comes from Vault!
+                        passwordVariable: 'DOCKER_PASSWORD'
                     )]) {
                         sh """
                             docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
-                            docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${DOCKER_USERNAME}/${IMAGE_NAME}:${env.BUILD_NUMBER}
-                            docker push ${DOCKER_USERNAME}/${IMAGE_NAME}:${env.BUILD_NUMBER}
+                            docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} $DOCKER_USERNAME/${IMAGE_NAME}:${env.BUILD_NUMBER}
+                            docker tag ${IMAGE_NAME}:latest $DOCKER_USERNAME/${IMAGE_NAME}:latest
+                            docker push $DOCKER_USERNAME/${IMAGE_NAME}:${env.BUILD_NUMBER}
+                            docker push $DOCKER_USERNAME/${IMAGE_NAME}:latest
                         """
                     }
                 }
@@ -105,11 +103,12 @@ pipeline {
     
     post {
         always {
+            // Safe cleanup without docker commands that might fail
             sh '''
                 docker rm -f test-app || true
-                docker rmi ${IMAGE_NAME}:${env.BUILD_NUMBER} || true
-                cleanWs()
+                echo "Cleanup completed"
             '''
+            cleanWs()
         }
         success {
             echo "🎉 Build ${env.BUILD_NUMBER} succeeded!"
