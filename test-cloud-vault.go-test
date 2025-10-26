@@ -1,0 +1,59 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+
+	"go-hello-operator/pkg/vault"
+)
+
+func main() {
+	fmt.Println("☁️  Testing Cloud Vault Connection...")
+
+	// Get environment variables
+	vaultAddr := os.Getenv("VAULT_ADDR")
+	vaultToken := os.Getenv("VAULT_TOKEN")
+	appEnv := os.Getenv("APP_ENV")
+
+	if vaultAddr == "" {
+		log.Fatal("❌ VAULT_ADDR environment variable is required")
+	}
+	if vaultToken == "" {
+		log.Fatal("❌ VAULT_TOKEN environment variable is required")
+	}
+	if appEnv == "" {
+		appEnv = "development"
+	}
+
+	fmt.Printf("🔗 Vault Address: %s\n", vaultAddr)
+	fmt.Printf("🏷️  Environment: %s\n", appEnv)
+	fmt.Printf("🔑 Token: %s...\n", vaultToken[:10])
+
+	// Test Vault client
+	vaultClient, err := vault.NewClient(appEnv)
+	if err != nil {
+		log.Fatalf("❌ Failed to create Vault client: %v", err)
+	}
+	fmt.Println("✅ Vault client created successfully")
+
+	// Test loading configuration
+	cfg, err := vaultClient.LoadConfig()
+	if err != nil {
+		log.Fatalf("❌ Failed to load config from Vault: %v", err)
+	}
+
+	fmt.Println("✅ Configuration loaded successfully from Cloud Vault!")
+	fmt.Printf("📋 Loaded Config:\n")
+	fmt.Printf("   Environment: %s\n", cfg.Environment)
+	fmt.Printf("   Server Port: %s\n", cfg.ServerPort)
+	fmt.Printf("   Log Level: %s\n", cfg.LogLevel)
+	fmt.Printf("   CORS Enabled: %v\n", cfg.EnableCORS)
+	fmt.Printf("   JWT Secret Loaded: %t\n", cfg.JWTSecret != "")
+	fmt.Printf("   API Key Loaded: %t\n", cfg.APIKey != "")
+
+	// Show API key (first few chars for verification)
+	if cfg.APIKey != "" {
+		fmt.Printf("   API Key Preview: %s...\n", cfg.APIKey[:10])
+	}
+}

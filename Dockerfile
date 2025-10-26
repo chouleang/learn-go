@@ -1,12 +1,23 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git
 WORKDIR /app
-COPY go.mod ./
+
+COPY go.mod go.sum ./
 RUN go mod download
+
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /server
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /server .
+RUN CGO_ENABLED=0 GOOS=linux go build -a \
+    -ldflags='-w -s -extldflags "-static"' \
+    -o main .
+
+FROM alpine:3.18
+RUN apk --no-cache add ca-certificates && update-ca-certificates
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+WORKDIR /app
+COPY --from=builder --chown=appuser:appgroup /app/main .
+
+USER appuser
 EXPOSE 8080
-CMD ["./server"]
+CMD ["./main"]
