@@ -1,0 +1,52 @@
+Script started on 2025-10-26 23:52:32+07:00 [TERM="xterm-256color" TTY="/dev/pts/4" COLUMNS="102" LINES="20"]
+                    // Test 1: Run commands inside a container
+                    docker.image('alpine:latest').inside {
+                        sh 'echo "Hello from Alpine container!"'
+                        sh 'cat /etc/os-release'
+                    }
+                    
+                    // Test 2: Pull and inspect image
+                    def testImage = docker.image('hello-world:latest')
+                    testImage.pull()
+                    echo "Image ID: ${testImage.id}"
+                }
+            }
+        }
+    }
+}]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                     // Test 1: Run commands inside a container
+bash: //: Is a directory
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                     docker.image('alpine:latest').inside {
+bash: syntax error near unexpected token `'alpine:latest''
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                         sh 'echo "Hello from Alpine container!"'
+sh: 0: Can't open echo "Hello from Alpine container!"
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                         sh 'cat /etc/os-release'
+sh: 0: Can't open cat /etc/os-release
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                     }
+bash: syntax error near unexpected token `}'
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                     
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                     // Test 2: Pull and inspect image
+bash: //: Is a directory
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                     def testImage = docker.image('hello-world:latest')
+bash: syntax error near unexpected token `('
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                     testImage.pull()
+>                     echo "Image ID: ${testImage.id}"
+bash: syntax error near unexpected token `echo'
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$                 }
+bash: syntax error near unexpected token `}'
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$             }
+bash: syntax error near unexpected token `}'
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$         }
+bash: syntax error near unexpected token `}'
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$     }
+bash: syntax error near unexpected token `}'
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$ }^C
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$ clear
+[H[2J[3J]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$ ls
+[0m[0m'{'[0m           [0mgo.mod[0m   [0mJenkinsfile[0m        [34mkub[0m       [34mpkg[0m         [0mtest-cloud-vault.go-test[0m
+ [0mDockerfile[0m   [0mgo.sum[0m   [0mJenkinsfile_copy[0m   [0mmain.go[0m   [0mREADME.md[0m   [34mvault[0m
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$ rm ^C
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$ rm Jenkinsfile_copy
+]0;sq@sq: ~/Documents/go/learn-go[01;32msq@sq[00m:[01;34m~/Documents/go/learn-go[00m$ ls
+[0m[0m'{'[0m           [0mgo.mod[0m   [0mJenkinsfile[0m   [0mmain.go[0m   [0mREADME.md[0m                  [34mvault[0m
+ [0mDockerfile[0m   [0mgo.sum[0m   [34mkub[0m           [34mpkg[0m       [0mtest-cloud-vault.go-test[0m
+]0;sq@sq: ~/Documen
