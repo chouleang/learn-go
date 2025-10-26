@@ -1,116 +1,101 @@
 pipeline {
-    agent {
-        docker {
-            image 'google/cloud-sdk:alpine'
-            args '-v /var/run/docker.sock:/var/run/docker.sock -u root:root'
-        }
-    }
-
-    tools {
-        go 'go1.21'
-    }
-
+    agent any
+    
     environment {
-        DOCKER_IMAGE = 'chouleang/go-hello-operator'
-        DOCKER_TAG = "build-${BUILD_NUMBER}"
-        GKE_CLUSTER = 'go-hello-cluster'
-        GKE_ZONE = 'asia-southeast1-a'
+        IMAGE_NAME = 'go-hello-operator'
+        VAULT_ADDR = 'http://vault.qwerfvcxza.site'  // Replace with your actual Vault URL
     }
-
+    
     stages {
-        stage('Setup') {
-            steps {
-                sh '''
-                    # Install Go, Docker, kubectl, and gke-gcloud-auth-plugin
-                    apk add --no-cache go docker
-                    
-                    # Install kubectl and gke-gcloud-auth-plugin
-                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-                    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-                    
-                    # Install gke-gcloud-auth-plugin
-                    gcloud components install gke-gcloud-auth-plugin --quiet
-                    
-                    go version
-                    docker --version
-                    kubectl version --client
-                    echo "All dependencies installed successfully!"
-                '''
-            }
-        }
-        
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
         
-        stage('Dependencies') {
+        stage('Load Vault Secrets') {
+            steps {
+                withVault(
+                    configuration: [
+                        vaultUrl: "${VAULT_ADDR}",
+                        vaultCredentialId: 'b1fd7cdc-25c5-4a31-9e87-3dce22039c11'  // Name of your Jenkins credential
+                    ],
+                    vaultSecrets: [
+                        [
+                            path: 'secret/data/jenkins/go-operator',
+                            secretValues: [
+                                [envVar: 'VAULT_TOKEN', vaultKey: 'vault-token'],
+                                [envVar: 'ENVIRONMENT', vaultKey: 'environment'],
+                                [envVar: 'DOCKER_PASSWORD', vaultKey: 'docker-password']
+                            ]
+                        ]
+                    ]
+                ) {
+                    echo "✅ Vault secrets loaded:"
+                    sh 'echo "Environment: $ENVIRONMENT"'
+                    sh 'echo "Docker password length: ${#DOCKER_PASSWORD}"'
+                    // Don't echo the actual token for security
+                }
+            }
+        }
+        
+        stage('Build and Test') {
             steps {
                 sh '''
-                go version
-                go mod download
+                    echo "Building Go application..."
+                    go mod download
+                    go test ./... -v
+                    go build -o main .
                 '''
             }
         }
         
         stage('Build Docker Image') {
             steps {
-                sh """
-                docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                """
-            }
-        }
-        
-        stage('Push to Docker Hub') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-hub-cred',
-                    usernameVariable: 'DOCKER_USERNAME',
-                    passwordVariable: 'DOCKER_PASSWORD'
-                )]) {
+                script {
+                    // Build with Vault environment variables
                     sh """
-                    echo \$DOCKER_PASSWORD | docker login -u \$DOCKER_USERNAME --password-stdin
-                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                    docker logout
-                    echo "Successfully pushed to Docker Hub!"
+                        docker build -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
+                        docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${IMAGE_NAME}:latest
                     """
                 }
             }
         }
         
-        stage('Deploy to GKE Singapore') {
+        stage('Test Container') {
             steps {
                 script {
-                    withCredentials([file(credentialsId: 'gcp-service-account-key', variable: 'GCP_KEY')]) {
+                    sh """
+                        docker run -d --name test-app \
+                          -e VAULT_ADDR="${VAULT_ADDR}" \
+                          -e VAULT_TOKEN="${VAULT_TOKEN}" \
+                          -e ENVIRONMENT="${ENVIRONMENT}" \
+                          -p 8080:8080 ${IMAGE_NAME}:${env.BUILD_NUMBER} &
+                        sleep 15
+                        echo "Testing container..."
+                        curl -f http://localhost:8080 || exit 1
+                        docker stop test-app
+                        docker rm test-app
+                    """
+                }
+            }
+        }
+        
+        stage('Push to Registry') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-creds',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'  // This comes from Vault!
+                    )]) {
                         sh """
-                        # Authenticate and configure
-                        gcloud auth activate-service-account --key-file=${GCP_KEY}
-                        gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE}
-                        
-                        echo "=== Current deployment image ==="
-                        kubectl get deployment go-hello-operator -o jsonpath='{.spec.template.spec.containers[0].image}'
-                        echo ""
-                        
-                        echo "=== Updating deployment to use new image ==="
-                        # Update the deployment with new image
-                        kubectl set image deployment/go-hello-operator go-hello-operator=${DOCKER_IMAGE}:${DOCKER_TAG} --record
-                        
-                        echo "=== Waiting for rollout ==="
-                        kubectl rollout status deployment/go-hello-operator --timeout=300s
-                        
-                        echo "=== Updated deployment image ==="
-                        kubectl get deployment go-hello-operator -o jsonpath='{.spec.template.spec.containers[0].image}'
-                        echo ""
-                        
-                        echo "=== New pods ==="
-                        kubectl get pods -l app=go-hello-operator
-                        
-                        # Get the service external IP
-                        EXTERNAL_IP=\$(kubectl get service go-hello-operator-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-                        echo "Application deployed to Singapore GKE"
-                        echo "Access your app at: http://\$EXTERNAL_IP"
-                        echo "New image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                            docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+                            docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${DOCKER_USERNAME}/${IMAGE_NAME}:${env.BUILD_NUMBER}
+                            docker push ${DOCKER_USERNAME}/${IMAGE_NAME}:${env.BUILD_NUMBER}
                         """
                     }
                 }
@@ -120,13 +105,17 @@ pipeline {
     
     post {
         always {
-            echo 'Pipeline completed!'
+            sh '''
+                docker rm -f test-app || true
+                docker rmi ${IMAGE_NAME}:${env.BUILD_NUMBER} || true
+                cleanWs()
+            '''
         }
         success {
-            echo "SUCCESS: Image ${DOCKER_IMAGE}:${DOCKER_TAG} deployed to Singapore GKE"
+            echo "🎉 Build ${env.BUILD_NUMBER} succeeded!"
         }
         failure {
-            echo 'Pipeline failed!'
+            echo "💥 Build ${env.BUILD_NUMBER} failed!"
         }
     }
 }
