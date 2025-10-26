@@ -22,7 +22,7 @@ pipeline {
                     ],
                     vaultSecrets: [
                         [
-                            path: 'secret/data/jenkins/go-operator',
+                            path: 'secret/jenkins/go-operator',
                             secretValues: [
                                 [envVar: 'VAULT_TOKEN', vaultKey: 'vault-token'],
                                 [envVar: 'ENVIRONMENT', vaultKey: 'environment'],
