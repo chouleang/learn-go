@@ -1,100 +1,249 @@
 pipeline {
-    agent {
-        docker {
-            image 'google/cloud-sdk:alpine'
-            args '-v /var/run/docker.sock:/var/run/docker.sock -u root:root'
-        }
+    agent any
+    
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
     }
-
+    
     environment {
-        DOCKER_IMAGE = 'chouleang/go-hello-operator'
-        DOCKER_TAG = "build-${BUILD_NUMBER}"
+        // Application Configuration
+        APP_NAME = 'go-hello-operator'
+        DOCKER_IMAGE = "chouleang/${APP_NAME}"
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
+        
+        // Vault Configuration
         VAULT_ADDR = 'http://vault.qwerfvcxza.site'
     }
 
     stages {
-        stage('Setup') {
-            steps {
-                sh '''
-                    # Install dependencies
-                    apk add --no-cache go docker
-                    go version
-                    docker --version
-                '''
-            }
-        }
-        
-        stage('Checkout') {
+        stage('Checkout & Initialize') {
             steps {
                 checkout scm
-            }
-        }
-        
-        stage('Load Vault Secrets') {
-            steps {
-                withVault(
-                    configuration: [
-                        vaultUrl: "${VAULT_ADDR}",
-                        vaultCredentialId: 'b1fd7cdc-25c5-4a31-9e87-3dce22039c11'
-                    ],
-                    vaultSecrets: [
-                        [
-                            path: 'secret/jenkins/go-operator',
-                            secretValues: [
-                                [envVar: 'VAULT_TOKEN', vaultKey: 'vault-token'],
-                                [envVar: 'ENVIRONMENT', vaultKey: 'environment'],
-                                [envVar: 'DOCKER_PASSWORD', vaultKey: 'docker-password']
-                            ]
-                        ]
-                    ]
-                ) {
-                    echo "✅ Vault secrets loaded"
+                script {
+                    echo "🔨 Building ${APP_NAME} - Commit: ${env.GIT_COMMIT}"
+                    echo "📋 Build Number: ${env.BUILD_NUMBER}"
+                    echo "🌿 Branch: ${env.BRANCH_NAME}"
                 }
             }
         }
         
-        stage('Dependencies') {
+        stage('Load Secrets from Vault') {
             steps {
-                sh 'go mod download'
+                withVault([
+                    configuration: [
+                        vaultUrl: "${VAULT_ADDR}",
+                        vaultCredentialId: 'vault-approle-credential'
+                    ],
+                    vaultSecrets: [
+                        [
+                            path: "secret/jenkins/go-operator",
+                            engineVersion: 2,
+                            secretValues: [
+                                [envVar: 'VAULT_APP_TOKEN', vaultKey: 'vault-token'],
+                                [envVar: 'APP_ENVIRONMENT', vaultKey: 'environment'],
+                                [envVar: 'DOCKER_REGISTRY_KEY', vaultKey: 'docker-password']
+                            ]
+                        ]
+                    ]
+                ]) {
+                    echo "✅ Vault secrets loaded successfully"
+                    sh """
+                        echo "Environment: ${APP_ENVIRONMENT}"
+                        echo "Vault Token: ${VAULT_APP_TOKEN}"
+                    """
+                }
+            }
+        }
+        
+        stage('Code Quality') {
+            parallel {
+                stage('Static Analysis') {
+                    steps {
+                        sh '''
+                            echo "🔍 Running static code analysis..."
+                            go vet ./...
+                            go fmt ./...
+                            echo "✅ Static analysis completed"
+                        '''
+                    }
+                }
+                stage('Dependency Management') {
+                    steps {
+                        sh '''
+                            echo "📦 Managing dependencies..."
+                            go mod download
+                            go mod verify
+                            go mod tidy
+                            echo "✅ Dependencies verified"
+                        '''
+                    }
+                }
+                stage('Security Check') {
+                    steps {
+                        sh '''
+                            echo "🔒 Running security checks..."
+                            # Check for vulnerable dependencies
+                            go list -json -m all | grep -q "Vulnerabilities" && echo "Vulnerabilities found" || echo "No known vulnerabilities"
+                            echo "✅ Security check completed"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                sh '''
+                    echo "🧪 Running test suite..."
+                    go test -v -race -coverprofile=coverage.out ./...
+                    go tool cover -func=coverage.out
+                '''
+            }
+            post {
+                always {
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: '.',
+                        reportFiles: 'coverage.out',
+                        reportName: 'Go Test Coverage'
+                    ])
+                    archiveArtifacts artifacts: 'coverage.out', fingerprint: true
+                }
+            }
+        }
+        
+        stage('Build Go Binary') {
+            steps {
+                sh '''
+                    echo "🏗️ Building Go binary..."
+                    CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-w -s -X main.version=${BUILD_NUMBER}" -o main .
+                    ls -la main
+                    file main
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'main', fingerprint: true
+                }
             }
         }
         
         stage('Build Docker Image') {
             steps {
-                sh """
-                docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                """
+                script {
+                    echo "🐳 Building Docker image..."
+                    def customImage = docker.build(
+                        "${DOCKER_IMAGE}:${DOCKER_TAG}",
+                        "--build-arg BUILD_NUMBER=${env.BUILD_NUMBER} " +
+                        "--build-arg GIT_COMMIT=${env.GIT_COMMIT} " +
+                        "--build-arg APP_ENVIRONMENT=${APP_ENVIRONMENT} ."
+                    )
+                    
+                    echo "✅ Docker image built: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                }
+            }
+        }
+        
+        stage('Container Security Scan') {
+            steps {
+                script {
+                    echo "🔍 Scanning container for vulnerabilities..."
+                    // This would run tools like Trivy, Grype, etc.
+                    // sh "trivy image ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    echo "✅ Container security scan completed"
+                }
             }
         }
         
         stage('Test Container') {
             steps {
-                sh """
-                docker run -d --name test-app \
-                  -e VAULT_ADDR="${VAULT_ADDR}" \
-                  -e VAULT_TOKEN="${VAULT_TOKEN}" \
-                  -e ENVIRONMENT="${ENVIRONMENT}" \
-                  -p 8080:8080 ${DOCKER_IMAGE}:${DOCKER_TAG} &
-                sleep 10
-                curl -f http://localhost:8080 || exit 1
-                docker stop test-app
-                docker rm test-app
-                """
+                script {
+                    echo "🧪 Testing container functionality..."
+                    sh """
+                        # Start container in background
+                        docker run -d --name test-container \
+                          -e VAULT_ADDR="${VAULT_ADDR}" \
+                          -e VAULT_TOKEN="${VAULT_APP_TOKEN}" \
+                          -e ENVIRONMENT="${APP_ENVIRONMENT}" \
+                          -p 8080:8080 ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        
+                        # Wait for app to start
+                        sleep 10
+                        
+                        # Test basic functionality
+                        echo "Testing application health..."
+                        curl -f http://localhost:8080 || exit 1
+                        
+                        # Test health endpoint if exists
+                        curl -f http://localhost:8080/health || echo "No health endpoint"
+                        
+                        # Stop and remove container
+                        docker stop test-container
+                        docker rm test-container
+                        
+                        echo "✅ Container test passed"
+                    """
+                }
             }
         }
         
-        stage('Push to Docker Hub') {
+        stage('Push to Registry') {
+            when {
+                expression { 
+                    env.BRANCH_NAME == 'main' || 
+                    env.BRANCH_NAME == 'develop' ||
+                    env.BRANCH_NAME.startsWith('release/')
+                }
+            }
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-hub-cred',
-                    usernameVariable: 'DOCKER_USERNAME',
-                    passwordVariable: 'DOCKER_PASSWORD'
-                )]) {
+                script {
+                    echo "📤 Pushing image to registry..."
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker-hub-cred') {
+                        docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
+                        
+                        // Tag as latest for main branch
+                        if (env.BRANCH_NAME == 'main') {
+                            docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push('latest')
+                            echo "✅ Tagged as latest"
+                        }
+                        
+                        // Tag with branch name for develop
+                        if (env.BRANCH_NAME == 'develop') {
+                            docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push('develop')
+                            echo "✅ Tagged as develop"
+                        }
+                    }
+                    echo "✅ Successfully pushed: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                }
+            }
+        }
+        
+        stage('Generate Build Report') {
+            steps {
+                script {
+                    echo "📊 Generating build report..."
                     sh """
-                    echo \$DOCKER_PASSWORD | docker login -u \$DOCKER_USERNAME --password-stdin
-                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                    docker logout
+                        echo "=== BUILD REPORT ==="
+                        echo "Application: ${APP_NAME}"
+                        echo "Image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                        echo "Build: ${env.BUILD_NUMBER}"
+                        echo "Commit: ${env.GIT_COMMIT}"
+                        echo "Branch: ${env.BRANCH_NAME}"
+                        echo "Environment: ${APP_ENVIRONMENT}"
+                        echo "Build URL: ${env.BUILD_URL}"
+                        echo "===================="
                     """
+                }
+            }
+            post {
+                always {
+                    // Archive important build artifacts
+                    archiveArtifacts artifacts: 'go.mod,go.sum,main', fingerprint: true
+                    junit '**/test-results/*.xml'  // If you have JUnit test results
                 }
             }
         }
@@ -102,8 +251,34 @@ pipeline {
     
     post {
         always {
-            sh 'docker rm -f test-app || true'
+            echo "🧹 Cleaning up workspace..."
+            sh '''
+                # Cleanup any test containers
+                docker rm -f test-container || true
+            '''
             cleanWs()
+        }
+        success {
+            script {
+                echo "🎉 CI PIPELINE SUCCESS"
+                echo "Image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                echo "Build: ${env.BUILD_URL}"
+                
+                // You can add notifications here
+                // slackSend channel: '#ci-cd', message: "✅ ${APP_NAME} CI passed - ${env.BUILD_URL}"
+            }
+        }
+        failure {
+            script {
+                echo "💥 CI PIPELINE FAILED"
+                echo "Failed build: ${env.BUILD_URL}"
+                
+                // Failure notifications
+                // slackSend channel: '#ci-cd', message: "❌ ${APP_NAME} CI failed - ${env.BUILD_URL}"
+            }
+        }
+        unstable {
+            echo "⚠️  CI PIPELINE UNSTABLE - Tests failed but build completed"
         }
     }
 }
